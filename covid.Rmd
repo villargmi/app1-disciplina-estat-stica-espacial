@@ -1,0 +1,164 @@
+---
+title: "Mapa de casos de Covid-19 em Sergipe Nov/22"
+author: "Milena Villar"
+date: "26 de janeiro de 2023"
+output:
+    html_document:
+       highlight: textmate
+       theme: flatly
+       number_sections: yes
+       toc: yes
+       toc_float:
+         collapsed: yes
+         smooth_scroll: no
+---
+
+#  Contextualização
+  
+O presente trabalho tem por finalidade apresentar os números de casos de covid utilizando dados geolocalizados e mapas interativos. O banco de dados utilizado é referente ao município de Sergipe e contém as informações de casos confirmados do vírus no mês de novembro de 2022. O código completo pode ser acessado no [github](https://github.com/villargmi/app1_disciplina_estatistica_espacial). 
+  
+#  Carregando os pacotes
+
+```{r Pacotes, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(leaflet)
+library(sf)  
+library(knitr)
+library(kableExtra)
+library(htmltools)
+```
+  
+#  Leitura e visualização do banco de dados
+  
+```{r, message = FALSE, warning = FALSE}
+
+# lendo arquivo dados covid
+dados<-read.csv("cases-brazil-cities-time_2022.csv")
+
+# lendo dados de latitude e longitude das cidades brasileiras 
+urlfile <- "https://raw.githubusercontent.com/kelvins/Municipios-Brasileiros/master/csv/municipios.csv"
+cities_lat_lng <- read.csv(urlfile,encoding = "UTF-8")
+```
+
+
+```{r, include = FALSE, message = FALSE, warning = FALSE}
+
+# criando nova coluna com o formato de data
+dados$data <- as.Date(dados$date)
+
+# filtrando somente os casos de sergipe de nov/22
+covid <- dados %>% 
+  filter(state == "SE" &
+           data >= "2022-11-01" & data < "2022-12-01" ) 
+
+# código de cidade em formato de texto, para o que a função left_join funcione
+cities_lat_lng$codigo_ibge <- as.character(cities_lat_lng$codigo_ibge)
+covid$ibgeID <- as.character(covid$ibgeID)
+covid <- left_join(covid, cities_lat_lng, by = c("ibgeID" = "codigo_ibge"))
+
+
+# Agrupando os dados
+covid19 <- covid %>%
+  group_by(ibgeID, nome, latitude, longitude ) %>%
+  summarise(t_newCases = sum(newCases),
+            t_totalCases = max(totalCases),
+            t_cases100 = max(totalCases_per_100k_inhabitants))
+
+#retirando linha que não contem nome da cidade
+covid19<-covid19[(-1),]
+
+
+```
+
+```{r}
+
+
+library(rmarkdown)
+paged_table(covid19)
+
+```
+
+
+#  Mapas do total de casos
+```{r}
+
+map_cities <- leaflet(covid19) %>% 
+  addTiles() %>%
+  addMarkers(lat= covid19$latitude,
+             lng= covid19$longitude,
+             popup = paste0("<b>Cidade: </b>", covid19$nome,"<br>",
+                            "<b>Total de Casos: </b>", covid19$t_newCases),
+             group = "addMarkers",
+             clusterOptions = markerClusterOptions())
+
+map_cities
+
+
+map_total_cases <- leaflet(covid19) %>% addTiles() %>%
+  addProviderTiles(providers$CartoDB.Positron) %>% 
+  addCircleMarkers(lat= covid19$latitude,
+                   lng= covid19$longitude,
+                   radius = ~sqrt(covid19$t_newCases),
+                   fillOpacity = 0.5, 
+                   stroke = F, 
+                   popup = paste0("<b>Cidade: </b>", covid19$nome,"<br>",
+                                  "<b>Casos Confirmados: </b>",  covid19$t_newCases),
+                   label = covid19$nome)
+map_total_cases 
+
+```
+
+
+
+#  Mapa de casos por 100 mil habitantes
+```{r, message = FALSE, warning = FALSE}
+
+#lendo shapefile de sergipe
+se_sf <- st_read('SE_Municipios_2021.shp', quiet = T)
+
+
+
+#unindo os dados de COVID-19 com as geometrias das cidades.
+se_sf <- se_sf %>% filter(CD_MUN %in% covid19$ibgeID)
+se_sf <- left_join(se_sf, covid19, by = c("CD_MUN" = "ibgeID"))
+
+## define cores para cada conjunto numérico
+pal <- colorNumeric(palette = "Reds", domain = se_sf$t_cases100)
+
+# heatmap dos casos de covid-19, por 100 mil habitantes, em SE.
+map_100k <- leaflet(se_sf %>% filter(!is.na(t_cases100), t_totalCases >0)) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addPolygons(data = se_sf,
+              smoothFactor = 0.5,
+              fillOpacity = 0.5,
+              weight = 0.5,
+              color = ~pal(t_cases100),
+              opacity = 0.8,
+              highlightOptions = highlightOptions(color = "black",
+                                                  weight = 2,
+                                                  bringToFront = TRUE),
+              popup = ~paste0(sep = " ",
+                              "<b>Cidade: </b>", nome, "<br>",
+                              "<b>Total de casos: </b>", t_totalCases, "<br>",
+                              "<b>Casos por 100k habitantes: </b>", t_cases100),
+              label = ~nome) %>% 
+  addLegend("bottomright",
+            title = "Casos confirmados por<br>100k habitantes", 
+            pal = pal, 
+            values = ~t_cases100, 
+            opacity = 0.8)
+map_100k
+
+
+```
+  
+
+
+
+
+  
+
+
+  
+
+
